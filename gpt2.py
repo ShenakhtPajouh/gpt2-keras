@@ -38,7 +38,7 @@ class LayerNormalization(tf.keras.layers.Layer):
                                      dtype=tf.float32)
         super().build(input_shape)
 
-    def call(self, inputs, axis=-1, epsilon=10e-12):
+    def call(self, inputs, axis=-1, epsilon=10e-5):
         mean, variance = tf.nn.moments(inputs, axis, keep_dims=True)
         rdev = tf.rsqrt(variance + epsilon)
         x = (inputs - mean) * rdev
@@ -69,7 +69,7 @@ def attention(query, key, value, multi_heads, mask=None,
         mask = None
     else:
         if one_sided:
-            q_rng = tf.range(query_num, type=tf.int32)
+            q_rng = tf.range(query_num, dtype=tf.int32)
             q_rng = tf.expand_dims(q_rng, 1)
             k_rng = tf.range(key_num, dtype=tf.int32)
             one_sided_mask = tf.greater_equal(q_rng, k_rng)
@@ -90,7 +90,7 @@ def attention(query, key, value, multi_heads, mask=None,
     coefficients = tf.matmul(query, key) / tf.sqrt(float(new_dim))
     if mask is not None:
         mask = tf.cast(mask, tf.float32)
-        coefficients = coefficients * mask + (1-mask) * -100
+        coefficients = coefficients * mask - (1-mask) * 10e10
     coefficients = tf.nn.softmax(coefficients, -1)
     coefficients, dropout = dropout_fn(coefficients, attention_dropout, cached_dropout)
     result = tf.matmul(coefficients, value)
@@ -155,8 +155,8 @@ class SelfAttention(tf.keras.layers.Layer):
         self.trainable = trainable
         self.dropout_cache = None
 
-    def call(self, inputs, mask=None, training=False,
-             cache=None, dropout_reuse=False, attention_probs_dropout_prob=None,
+    def call(self, inputs, cache=None, mask=None, one_sided=True,
+             dropout_reuse=False, attention_dropout=None,
              return_cache=False):
         """
         inputs: a tensor of shape [batch_size, seq_length, dim]
@@ -174,24 +174,25 @@ class SelfAttention(tf.keras.layers.Layer):
             key = tf.concat([cache["key"], key], 1)
             value = tf.concat([cache["value"], value], 1)
         result, self.dropout_cache = attention(query, key, value, self.num_attention_heads,
-                                               mask=mask, attention_dropout=attention_probs_dropout_prob,
-                                               cached_dropout=dropout_cache)
+                                               mask=mask, attention_dropout=attention_dropout,
+                                               cached_dropout=dropout_cache,
+                                               one_sided=one_sided)
         if return_cache:
             cache = {"key": key, "value": value}
             return result, cache
         else:
             return result
 
-    def __call__(self, inputs, mask=None, attention_probs_dropout_prob=None, training=False,
-                 cache=None, dropout_reuse=False, return_cache=False):
+    def __call__(self, inputs, cache=None, mask=None, attention_dropout=None,
+                 dropout_reuse=False, return_cache=False, one_sided=True):
         return super().__call__(
             inputs=inputs,
             mask=mask,
-            attention_probs_dropout_prob=attention_probs_dropout_prob,
-            training=training,
+            attention_dropout=attention_dropout,
             cache=cache,
             dropout_reuse=dropout_reuse,
-            return_cache=return_cache
+            return_cache=return_cache,
+            one_sided=one_sided
         )
 
 
@@ -200,8 +201,8 @@ class AttentionLayer(tf.keras.layers.Layer):
     def __init__(self, config, name=None, trainable=True, initializer_range=0.02):
         super().__init__(name=name, trainable=trainable)
         self.layer_norm = LayerNormalization(name="layer_norm")
-        self.self_attention = SelfAttention(num_attention_heads=config["n_heads"],
-                                            size_per_head=config["n_embd"] // config["n_heads"],
+        self.self_attention = SelfAttention(num_attention_heads=config["n_head"],
+                                            size_per_head=config["n_embd"] // config["n_head"],
                                             initializer_range=initializer_range,
                                             name="self"
                                             )
@@ -213,8 +214,9 @@ class AttentionLayer(tf.keras.layers.Layer):
     def call(self, inputs, cache=None, dropout=None, attention_dropout=None, dropout_reuse=False,
              return_cache=False):
         x = self.layer_norm(inputs)
-        x = self.self_attention(x, attention_probs_dropout_prob=attention_dropout,
-                                cache=cache, dropout_reuse=dropout_reuse, return_cache=return_cache)
+        x = self.self_attention(x, attention_dropout=attention_dropout,
+                                cache=cache, dropout_reuse=dropout_reuse,
+                                return_cache=return_cache)
         if return_cache:
             x, cache = x
         x = self.projection(x)
@@ -231,7 +233,7 @@ class AttentionLayer(tf.keras.layers.Layer):
                  dropout_reuse=False, return_cache=False):
         return super().__call__(inputs=inputs,
                                 cache=cache, dropout=dropout,
-                                attention_drop_dropout=attention_dropout,
+                                attention_dropout=attention_dropout,
                                 dropout_reuse=dropout_reuse,
                                 return_cache=return_cache)
 
@@ -415,11 +417,11 @@ class Embedding(tf.keras.layers.Layer):
             initializer=tf.random_normal_initializer(stddev=self.initializer_range),
         )
 
-    def call(self, inputs, use_one_hot_keys=True, start=None):
+    def call(self, inputs, use_one_hot_keys=False, start=None):
         shape = get_tensor_shape(inputs)
         if use_one_hot_keys:
             x = tf.reshape(inputs, [shape[0] * shape[1]])
-            x = tf.one_hot(x, self.embedding_size)
+            x = tf.one_hot(x, self.vocab_size)
             x = tf.matmul(x, self.word_embedding)
             x = tf.reshape(x, [shape[0], shape[1], self.embedding_size])
         else:
@@ -431,13 +433,13 @@ class Embedding(tf.keras.layers.Layer):
         x = x + pe
         return x
 
-    def __call__(self, inputs, use_one_hot_keys=True, start=None):
-        return super.__call__(inputs=inputs,
-                              use_one_hot_keys=use_one_hot_keys,
-                              start=start)
+    def __call__(self, inputs, use_one_hot_keys=False, start=None):
+        return super().__call__(inputs=inputs,
+                                use_one_hot_keys=use_one_hot_keys,
+                                start=start)
 
 
-class GPT(tf.keras.Model):
+class GPT2(tf.keras.Model):
 
     def __init__(self, config, name=None, trainable=True):
         super().__init__(name=name)
@@ -450,7 +452,7 @@ class GPT(tf.keras.Model):
         )
         self.transformer = Transformer(config, name="transformer")
 
-    def call(self, inputs, cache=None, use_one_hot_keys=True,
+    def call(self, inputs, cache=None, use_one_hot_keys=False,
              dropout=None, attention_dropout=None,
              dropout_reuse=False, return_cache=False, return_logits=True):
         if cache is not None:
@@ -482,8 +484,19 @@ class GPT(tf.keras.Model):
         else:
             return result
 
-
-
+    def __call__(self, inputs, cache=None, use_one_hot_keys=False,
+                 dropout=None, attention_dropout=None,
+                 dropout_reuse=False, return_cache=False, return_logits=True):
+        return super().__call__(
+            inputs=inputs,
+            cache=cache,
+            use_one_hot_keys=use_one_hot_keys,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+            dropout_reuse=dropout_reuse,
+            return_cache=return_cache,
+            return_logits=return_logits
+        )
 
 
 
