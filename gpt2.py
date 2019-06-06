@@ -52,34 +52,18 @@ class LayerNormalization(tf.keras.layers.Layer):
 
 
 def attention(query, key, value, multi_heads, mask=None,
-              one_sided=False, attention_dropout=None, cached_dropout=None):
+              attention_dropout=None, cached_dropout=None):
     """
     query: A tensor of shape [batch_size, query_num, dim]
     key: A tensor of shape [batch_size, key_num, dim]
     value: A tensor of shape [batch_size, key_num, value_dim]
     query_mask: a boolean tensor of shape [batch_size, query_num]
-    key_mask: a boolean tensor of shape [batch_size, key_num]
+    mask: a boolean tensor for coefficient mask. could be a tensor of [batch_size, multi_heads, query_num, key_num] or a compatible shape
     one_sided: a boolean which determines if the attention mechanism is one sided or not
     attention_dropout: dropout for attention coefficients
     """
     batch_size, query_num, dim = get_tensor_shape(query)
     _, key_num, value_dim = get_tensor_shape(value)
-    # construct mask
-    if mask is None and not one_sided:
-        mask = None
-    else:
-        if one_sided:
-            q_rng = tf.range(query_num, dtype=tf.int32)
-            q_rng = tf.expand_dims(q_rng, 1)
-            k_rng = tf.range(key_num, dtype=tf.int32)
-            one_sided_mask = tf.greater_equal(q_rng, k_rng)
-            one_sided_mask = tf.reshape(one_sided_mask, [1, 1, query_num, key_num])
-        if mask is not None:
-            mask = tf.reshape(mask, [batch_size, 1, 1, key_num])
-            if one_sided:
-                mask = tf.logical_and(mask, one_sided_mask)
-        else:
-            mask = one_sided_mask
     new_dim = dim // multi_heads
     query = tf.reshape(query, [batch_size, query_num, multi_heads, new_dim])
     key = tf.reshape(key, [batch_size, key_num, multi_heads, new_dim])
@@ -89,7 +73,8 @@ def attention(query, key, value, multi_heads, mask=None,
     value = tf.transpose(value, [0, 2, 1, 3])
     coefficients = tf.matmul(query, key) / tf.sqrt(float(new_dim))
     if mask is not None:
-        mask = tf.cast(mask, tf.float32)
+
+        mask = tf.cast(mask, coefficients.dtype)
         coefficients = coefficients * mask - (1-mask) * 10e10
     coefficients = tf.nn.softmax(coefficients, -1)
     coefficients, dropout = dropout_fn(coefficients, attention_dropout, cached_dropout)
@@ -121,7 +106,9 @@ def dropout_fn(input_tensor, dropout_prob=None, cached_dropout=None):
 
 class SelfAttention(tf.keras.layers.Layer):
 
-    def __init__(self, num_attention_heads=1, size_per_head=512, query_act=None,
+    def __init__(self, num_attention_heads=1, size_per_head=512,
+                 one_sided=True,
+                 query_act=None,
                  initializer_range=0.02,
                  value_act=None,
                  key_act=None,
@@ -154,8 +141,36 @@ class SelfAttention(tf.keras.layers.Layer):
         self.num_attention_heads = num_attention_heads
         self.trainable = trainable
         self.dropout_cache = None
+        self.one_sided = one_sided
 
-    def call(self, inputs, cache=None, mask=None, one_sided=True,
+    def get_mask(self, inputs, cache=None, mask=None):
+        shape = get_tensor_shape(inputs)
+        if cache is not None:
+            cache_num = get_tensor_shape(cache["key"])[1]
+        else:
+            cache_num = 0
+        if self.one_sided:
+            _range = tf.range(shape[1])
+            one_sided_mask = tf.expand_dims(_range, 1) >= _range
+            if cache is not None:
+                cache_mask = tf.ones((shape[1], cache_num), dtype=tf.bool)
+                one_sided_mask = tf.concat([cache_mask, one_sided_mask], 1)
+            one_sided_mask = tf.reshape(one_sided_mask, [1, 1, shape[1], shape[1] + cache_num])
+        if mask is not None:
+            if cache is not None:
+                cache_mask = tf.ones((shape[0], cache_num), dtype=tf.bool)
+                mask = tf.concat([cache_mask, mask], 1)
+            mask = tf.reshape(mask, [shape[0], 1, 1, shape[1] + cache_num])
+            if self.one_sided:
+                mask = tf.logical_and(mask, one_sided_mask)
+        if mask is None and self.one_sided:
+            return one_sided_mask
+        elif mask is None:
+            return None
+        else:
+            return mask
+
+    def call(self, inputs, cache=None, mask=None,
              dropout_reuse=False, attention_dropout=None,
              return_cache=False):
         """
@@ -173,10 +188,10 @@ class SelfAttention(tf.keras.layers.Layer):
         if cache is not None:
             key = tf.concat([cache["key"], key], 1)
             value = tf.concat([cache["value"], value], 1)
+        mask = self.get_mask(inputs, cache, mask)
         result, self.dropout_cache = attention(query, key, value, self.num_attention_heads,
                                                mask=mask, attention_dropout=attention_dropout,
-                                               cached_dropout=dropout_cache,
-                                               one_sided=one_sided)
+                                               cached_dropout=dropout_cache)
         if return_cache:
             cache = {"key": key, "value": value}
             return result, cache
@@ -184,7 +199,7 @@ class SelfAttention(tf.keras.layers.Layer):
             return result
 
     def __call__(self, inputs, cache=None, mask=None, attention_dropout=None,
-                 dropout_reuse=False, return_cache=False, one_sided=True):
+                 dropout_reuse=False, return_cache=False):
         return super().__call__(
             inputs=inputs,
             mask=mask,
@@ -192,7 +207,6 @@ class SelfAttention(tf.keras.layers.Layer):
             cache=cache,
             dropout_reuse=dropout_reuse,
             return_cache=return_cache,
-            one_sided=one_sided
         )
 
 
