@@ -5,6 +5,9 @@ import original_gpt2
 import argparse
 
 class ReArrange(object):
+    """
+    Map original model weights to our tf.keras model weights.
+    """
 
     @classmethod
     def Embedding(cls, weights):
@@ -103,6 +106,22 @@ class ReArrange(object):
 
 
 def build(config, checkpoint_path, session=None, name=None):
+    """
+
+    Build a GPT2 model (in tf.keras format) from pre-trained original checkpoint.
+
+    Args:
+        config: A dictionary, for model hyper parameters.
+        checkpoint_path: path of original checkpoint.
+        session: since it's needed to load weights on tf.Session in Graph Execution, a session should be
+                 passed to this method, or else the method uses default session if it exist. in Eager Execution
+                 there is no need for this argument.
+        name: name of model.
+
+    Returns:
+        a GPT2 model which the pre-trained weights are loaded.
+
+    """
     if name is None:
         name = "gpt2"
     conf = tf.ConfigProto(device_count={'GPU': 0})

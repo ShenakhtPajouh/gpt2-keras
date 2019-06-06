@@ -1,4 +1,5 @@
 """Byte pair encoding utilities"""
+""" From https://github.com/openai/gpt-2 """
 
 import os
 import json

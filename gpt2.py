@@ -175,8 +175,10 @@ class SelfAttention(tf.keras.layers.Layer):
              return_cache=False):
         """
         inputs: a tensor of shape [batch_size, seq_length, dim]
+        cache: A dictionary consist of key and value from previous calls.
         mask: a boolean tensor of shape [batch_size, seq_length]
         attention_probs_dropout_prob: dropout use for attention mechanism
+        return_cache: if True, it returns key and values as besides layer output
         """
         query = self.query_layer(inputs)
         key = self.key_layer(inputs)
@@ -227,6 +229,14 @@ class AttentionLayer(tf.keras.layers.Layer):
 
     def call(self, inputs, cache=None, dropout=None, attention_dropout=None, dropout_reuse=False,
              return_cache=False):
+        """
+
+        inputs: a tensor of shape [batch_size, seq_length, dim]
+        cache: (Optional): a dictionary of tensors key and value from previous calls.
+        dropout_reuse: if True, it uses previous dropout tensor.
+        return_cache: if True, returns a dictionary of key and value tensors besides layer output.
+
+        """
         x = self.layer_norm(inputs)
         x = self.self_attention(x, attention_dropout=attention_dropout,
                                 cache=cache, dropout_reuse=dropout_reuse,
@@ -268,6 +278,11 @@ class MultiLayerPerceptron(tf.keras.layers.Layer):
         self.dropout_cache = None
 
     def call(self, inputs, dropout=None, dropout_reuse=False):
+        """
+
+        inputs: tensor of [batch_size, seq_length, dim]
+
+        """
         x = self.layer_norm(inputs)
         x = self.perceptron(x)
         x = self.projection(x)
@@ -341,6 +356,14 @@ class Transformer(tf.keras.Model):
 
     def call(self, inputs, cache=None, dropout=None, attention_dropout=None,
              dropout_reuse=False, return_cache=False, blocks=None):
+        """
+
+        inputs: a tensor of shape [batch_size, seq_length, dim]
+        cache: a list of dictionaries. key and values from previous calls.
+        blocks: a list. if it is specified, the output will be a dictionary {layer_num: layer_output}
+        return_cache: if it is True, it returns new caches alongside outputs.
+
+        """
         if blocks is None:
             max_block = self.blocks_num - 1
         elif len(blocks) == 0:
@@ -432,6 +455,11 @@ class Embedding(tf.keras.layers.Layer):
         )
 
     def call(self, inputs, use_one_hot_keys=False, start=None):
+        """
+
+        inputs: an integer tensor of shape [batch_size, seq_length] token ids.
+
+        """
         shape = get_tensor_shape(inputs)
         if use_one_hot_keys:
             x = tf.reshape(inputs, [shape[0] * shape[1]])
@@ -469,6 +497,14 @@ class GPT2(tf.keras.Model):
     def call(self, inputs, cache=None, use_one_hot_keys=False,
              dropout=None, attention_dropout=None,
              dropout_reuse=False, return_cache=False, return_logits=True):
+        """
+
+        inputs: an integer tensor of shape [batch_size, seq_length]
+        cache: a list of dictionaries {"key": key, "value": value} of previous keys and values. it uses for generation
+        use_one_hot_keys: if True it uses one hot tensors for embedding layer.
+        return_cache: if True returns new keys and values alongside output. it uses for generation.
+        return_logits: if True, return logits, else return last layer embedding.
+        """
         if cache is not None:
             _cache = cache[0]
             start = get_tensor_shape(_cache)[1]
