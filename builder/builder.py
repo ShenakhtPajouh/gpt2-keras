@@ -3,6 +3,7 @@ import numpy as np
 import gpt2
 import original_gpt2
 import argparse
+import json
 
 class ReArrange(object):
     """
@@ -125,6 +126,8 @@ def build(config, checkpoint_path, session=None, name=None):
     if name is None:
         name = "gpt2"
     conf = tf.ConfigProto(device_count={'GPU': 0})
+    with open(config) as f:
+        config = json.load(f)
     graph = tf.Graph()
     with graph.as_default():
         x = tf.ones(shape=(1, 1), dtype=tf.int32)
@@ -135,7 +138,7 @@ def build(config, checkpoint_path, session=None, name=None):
         original_weights = ReArrange.GPT2(original_weights)
         saver = tf.train.Saver()
         sess = tf.Session(config=conf, graph=graph)
-    saver.restore(sess=sess, save_path=checkpoint_path)
+        saver.restore(sess=sess, save_path=checkpoint_path)
     original_weights = sess.run(original_weights)
     sess.close()
     eager = session is None and tf.executing_eagerly()
@@ -170,11 +173,3 @@ if __name__ == "__main__":
     tf.enable_eager_execution(config=conf)
     model = build(args.config, args.checkpoint, name="bert")
     model.save_weights(args.target, save_format="h5")
-
-
-
-
-
-
-
-

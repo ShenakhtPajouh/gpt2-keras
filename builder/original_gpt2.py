@@ -20,7 +20,7 @@ def shape_list(x):
 def softmax(x, axis=-1):
     x = x - tf.reduce_max(x, axis=axis, keepdims=True)
     ex = tf.exp(x)
-    return ex / tf.reduce_sum(ex, original_gptaxis=axis, keepdims=True)
+    return ex / tf.reduce_sum(ex, axis=axis, keepdims=True)
 
 def gelu(x):
     return 0.5*x*(1+tf.tanh(np.sqrt(2/np.pi)*(x+0.044715*tf.pow(x, 3))))
