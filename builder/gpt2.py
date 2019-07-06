@@ -134,7 +134,8 @@ class SelfAttention(tf.keras.layers.Layer):
             return mask
 
     def attend(self, query, key, value, mask=None, dropout=None):
-        _sqrt = tf.math.sqrt(self.size_per_head)
+        dim = tf.cast(self.size_per_head, query.dtype)
+        _sqrt = tf.math.sqrt(dim)
         _sqrt = tf.cast(_sqrt, query.dtype)
         coefficients = tf.matmul(query, key, transpose_b=True) / _sqrt
         if mask is not None:
@@ -171,7 +172,8 @@ class SelfAttention(tf.keras.layers.Layer):
             key = tf.concat([cache["key"], key], 2)
             value = tf.concat([cache["value"], value], 2)
             cache_length = get_tensor_shape(cache["key"])[2]
-        mask = self.get_mask(inputs, cache_length, mask)
+        inputs_shape = get_tensor_shape(query)
+        mask = self.get_mask(inputs_shape, cache_length, mask)
         result = self.attend(query, key, value, mask, attention_dropout)
         result = self.final_shape(result, use_2d)
         if return_cache:
