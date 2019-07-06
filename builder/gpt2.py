@@ -470,21 +470,15 @@ class Embedding(tf.keras.layers.Layer):
             initializer=tf.random_normal_initializer(stddev=self.initializer_range),
         )
 
-    def call(self, inputs, use_one_hot_keys=False, start=None):
+    def call(self, inputs, start=None):
         """
 
-        if use_one_hot_keys is True, then inputs are one_hot tensors of shape [batch_size, seq_length, vocab_size],
-        else it is an integer tensor of [batch_size, seq_length] of token ids.
+        inputs: integer tensor of [batch_size, seq_length]
         start: start of positional embedding
 
         """
         shape = get_tensor_shape(inputs)
-        if use_one_hot_keys:
-            x = tf.reshape(inputs, [shape[0] * shape[1], self.vocab_size])
-            x = tf.matmul(x, self.word_embedding)
-            x = tf.reshape(x, [shape[0], shape[1], self.embedding_size])
-        else:
-            x = tf.gather(self.word_embedding, inputs)
+        x = tf.gather(self.word_embedding, inputs)
         if start is None:
             start = 0
         end = start + shape[1]
@@ -492,7 +486,7 @@ class Embedding(tf.keras.layers.Layer):
         x = x + pe
         return x
 
-    def __call__(self, inputs, use_one_hot_keys=False, start=None):
+    def __call__(self, inputs, start=None):
         """
 
         if use_one_hot_keys is True, then inputs are one_hot tensors of shape [batch_size, seq_length, vocab_size],
@@ -500,9 +494,7 @@ class Embedding(tf.keras.layers.Layer):
         start: start of positional embedding
 
         """
-        return super().__call__(inputs=inputs,
-                                use_one_hot_keys=use_one_hot_keys,
-                                start=start)
+        return super().__call__(inputs=inputs, start=start)
 
 
 class GPT2(tf.keras.Model):
@@ -519,7 +511,7 @@ class GPT2(tf.keras.Model):
         )
         self.transformer = Transformer(config, name="transformer")
 
-    def call(self, inputs, cache=None, use_one_hot_keys=False,
+    def call(self, inputs, cache=None,
              dropout=None, attention_dropout=None,
              return_cache=False, return_logits=True, use_2d=False):
         """
@@ -538,7 +530,7 @@ class GPT2(tf.keras.Model):
             start = get_tensor_shape(_cache)[2]
         else:
             start = None
-        x = self.embedding(inputs, use_one_hot_keys, start)
+        x = self.embedding(inputs, start)
         if use_2d:
             shape = get_tensor_shape(x)
             x = tf.reshape(x, [shape[0] * shape[1], shape[2]])
@@ -571,14 +563,13 @@ class GPT2(tf.keras.Model):
         else:
             return result
 
-    def __call__(self, inputs, cache=None, use_one_hot_keys=False,
+    def __call__(self, inputs, cache=None,
                  dropout=None, attention_dropout=None,
                  return_cache=False, return_logits=True,
                  use_2d=False):
         """
 
-        inputs: an integer tensor of shape [batch_size, seq_length] if not use_2d is False
-                else a one_hot tensor of shape [batch_size, seq_length, vocab_size]
+        inputs: an integer tensor of shape [batch_size, seq_length]
         cache: a list of dictionaries {"key": key, "value": value} of previous keys and values. it uses for generation
         use_one_hot_keys: if True it uses one hot tensors for embedding layer.
         return_cache: if True returns new keys and values alongside output. it uses for generation.
@@ -589,7 +580,6 @@ class GPT2(tf.keras.Model):
         return super().__call__(
             inputs=inputs,
             cache=cache,
-            use_one_hot_keys=use_one_hot_keys,
             dropout=dropout,
             attention_dropout=attention_dropout,
             return_cache=return_cache,
